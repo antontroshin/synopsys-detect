@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Predicate;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -25,14 +26,17 @@ import com.synopsys.integration.blackduck.codelocation.signaturescanner.ScanBatc
 import com.synopsys.integration.blackduck.configuration.BlackDuckServerConfig;
 import com.synopsys.integration.blackduck.service.model.NotificationTaskRange;
 import com.synopsys.integration.blackduck.useragent.UserAgentItem;
+import com.synopsys.integration.common.util.finder.FileFinder;
 import com.synopsys.integration.detect.configuration.DetectInfo;
 import com.synopsys.integration.detect.configuration.DetectUserFriendlyException;
 import com.synopsys.integration.detect.configuration.connection.ConnectionFactory;
 import com.synopsys.integration.detect.configuration.enumeration.ExitCodeType;
-import com.synopsys.integration.detect.lifecycle.DetectContext;
-import com.synopsys.integration.detect.workflow.codelocation.CodeLocationNameGenerator;
+import com.synopsys.integration.detect.lifecycle.run.data.DockerTargetData;
+import com.synopsys.integration.detect.lifecycle.shutdown.ExitCodePublisher;
 import com.synopsys.integration.detect.workflow.codelocation.CodeLocationNameManager;
 import com.synopsys.integration.detect.workflow.file.DirectoryManager;
+import com.synopsys.integration.detect.workflow.status.OperationSystem;
+import com.synopsys.integration.detect.workflow.status.StatusEventPublisher;
 import com.synopsys.integration.exception.IntegrationException;
 import com.synopsys.integration.log.SilentIntLogger;
 import com.synopsys.integration.rest.HttpUrl;
@@ -42,23 +46,34 @@ import com.synopsys.integration.util.NameVersion;
 
 public class BlackDuckSignatureScannerTool {
     private final Logger logger = LoggerFactory.getLogger(BlackDuckSignatureScannerTool.class);
-    private final DetectContext detectContext;
     private final BlackDuckSignatureScannerOptions signatureScannerOptions;
+    private final Predicate<File> fileFilter;
+    private final ConnectionFactory connectionFactory;
+    private final DirectoryManager directoryManager;
+    private final CodeLocationNameManager codeLocationNameManager;
+    private final DetectInfo detectInfo;
+    private final FileFinder fileFinder;
+    private final OperationSystem operationSystem;
+    private final ExitCodePublisher exitCodePublisher;
+    private final StatusEventPublisher statusEventPublisher;
 
-    public BlackDuckSignatureScannerTool(BlackDuckSignatureScannerOptions signatureScannerOptions, DetectContext detectContext) {
+    public BlackDuckSignatureScannerTool(BlackDuckSignatureScannerOptions signatureScannerOptions, Predicate<File> fileFilter, final ConnectionFactory connectionFactory,
+        final DirectoryManager directoryManager, final CodeLocationNameManager codeLocationNameManager, final DetectInfo detectInfo,
+        final FileFinder fileFinder, final OperationSystem operationSystem, final ExitCodePublisher exitCodePublisher, final StatusEventPublisher statusEventPublisher) {
         this.signatureScannerOptions = signatureScannerOptions;
-        this.detectContext = detectContext;
+        this.fileFilter = fileFilter;
+        this.connectionFactory = connectionFactory;
+        this.directoryManager = directoryManager;
+        this.codeLocationNameManager = codeLocationNameManager;
+        this.detectInfo = detectInfo;
+        this.fileFinder = fileFinder;
+        this.operationSystem = operationSystem;
+        this.exitCodePublisher = exitCodePublisher;
+        this.statusEventPublisher = statusEventPublisher;
     }
 
-    // TODO: Don't accept an Optional as a parameter.
-    public SignatureScannerToolResult runScanTool(CodeLocationCreationService codeLocationCreationService, BlackDuckServerConfig blackDuckServerConfig, NameVersion projectNameVersion, Optional<File> dockerTar)
+    public SignatureScannerToolResult runScanTool(CodeLocationCreationService codeLocationCreationService, BlackDuckServerConfig blackDuckServerConfig, NameVersion projectNameVersion, @Nullable DockerTargetData dockerTargetData)
         throws DetectUserFriendlyException {
-        ConnectionFactory connectionFactory = detectContext.getBean(ConnectionFactory.class);
-        DirectoryManager directoryManager = detectContext.getBean(DirectoryManager.class);
-        CodeLocationNameGenerator codeLocationNameService = detectContext.getBean(CodeLocationNameGenerator.class);
-        CodeLocationNameManager codeLocationNameManager = detectContext.getBean(CodeLocationNameManager.class, codeLocationNameService);
-        DetectInfo detectInfo = detectContext.getBean(DetectInfo.class);
-
         Optional<Path> localScannerInstallPath = determineLocalScannerInstallPath();
 
         ExecutorService executorService = Executors.newFixedThreadPool(signatureScannerOptions.getParallelProcessors());
@@ -69,8 +84,9 @@ public class BlackDuckSignatureScannerTool {
         ScanBatchRunner scanBatchRunner = createScanBatchRunner(blackDuckServerConfig, localScannerInstallPath.orElse(null), scanBatchRunnerFactory, installDirectory, connectionFactory, detectInfo);
 
         try {
-            BlackDuckSignatureScanner blackDuckSignatureScanner = detectContext.getBean(BlackDuckSignatureScanner.class, signatureScannerOptions, scanBatchRunner, blackDuckServerConfig, codeLocationNameManager);
-            return runScanner(blackDuckSignatureScanner, codeLocationCreationService, blackDuckServerConfig, projectNameVersion, installDirectory, dockerTar.orElse(null));
+            BlackDuckSignatureScanner blackDuckSignatureScanner = new BlackDuckSignatureScanner(directoryManager, codeLocationNameManager, signatureScannerOptions, scanBatchRunner, blackDuckServerConfig, statusEventPublisher,
+                exitCodePublisher, operationSystem, fileFinder, fileFilter);
+            return runScanner(blackDuckSignatureScanner, codeLocationCreationService, blackDuckServerConfig, projectNameVersion, installDirectory, dockerTargetData);
         } catch (IOException | IntegrationException e) {
             logger.error(String.format("Signature scan failed: %s", e.getMessage()));
             logger.debug("Signature scan error", e);
@@ -140,20 +156,20 @@ public class BlackDuckSignatureScannerTool {
     }
 
     private SignatureScannerToolResult runScanner(BlackDuckSignatureScanner blackDuckSignatureScanner, CodeLocationCreationService codeLocationCreationService, @Nullable BlackDuckServerConfig blackDuckServerConfig,
-        NameVersion projectNameVersion, File installDirectory, @Nullable File dockerTar)
+        NameVersion projectNameVersion, File installDirectory, @Nullable DockerTargetData dockerTargetData)
         throws IntegrationException, IOException, DetectUserFriendlyException {
         // When offline, server config is null, otherwise scanner is created the same way online/offline.
         if (codeLocationCreationService != null && blackDuckServerConfig != null) {
             logger.debug("Signature scan is online.");
             // Since we are online, we need to calculate the notification task range to wait for code locations.
             NotificationTaskRange notificationTaskRange = codeLocationCreationService.calculateCodeLocationRange();
-            ScanBatchOutput scanBatchOutput = blackDuckSignatureScanner.performScanActions(projectNameVersion, installDirectory, dockerTar);
+            ScanBatchOutput scanBatchOutput = blackDuckSignatureScanner.performScanActions(projectNameVersion, installDirectory, dockerTargetData);
             CodeLocationCreationData<ScanBatchOutput> codeLocationCreationData = new CodeLocationCreationData<>(notificationTaskRange, scanBatchOutput);
             return SignatureScannerToolResult.createOnlineResult(codeLocationCreationData);
         } else {
             logger.debug("Signature scan is offline.");
             // Since we are offline, we can just perform the scan actions.
-            ScanBatchOutput scanBatchOutput = blackDuckSignatureScanner.performScanActions(projectNameVersion, installDirectory, dockerTar);
+            ScanBatchOutput scanBatchOutput = blackDuckSignatureScanner.performScanActions(projectNameVersion, installDirectory, dockerTargetData);
             return SignatureScannerToolResult.createOfflineResult(scanBatchOutput);
         }
     }

@@ -27,25 +27,25 @@ import com.synopsys.integration.configuration.config.PropertyConfiguration;
 import com.synopsys.integration.configuration.property.types.path.PathResolver;
 import com.synopsys.integration.configuration.source.MapPropertySource;
 import com.synopsys.integration.configuration.source.PropertySource;
-import com.synopsys.integration.detect.RunBeanConfiguration;
 import com.synopsys.integration.detect.configuration.DetectConfigurationFactory;
 import com.synopsys.integration.detect.configuration.DetectProperties;
 import com.synopsys.integration.detect.configuration.DetectPropertyUtil;
 import com.synopsys.integration.detect.configuration.DetectUserFriendlyException;
 import com.synopsys.integration.detect.configuration.DetectableOptionFactory;
 import com.synopsys.integration.detect.configuration.enumeration.DetectGroup;
+import com.synopsys.integration.detect.configuration.enumeration.DetectTargetType;
 import com.synopsys.integration.detect.configuration.help.DetectArgumentState;
 import com.synopsys.integration.detect.configuration.help.json.HelpJsonManager;
 import com.synopsys.integration.detect.configuration.help.print.HelpPrinter;
 import com.synopsys.integration.detect.configuration.validation.DeprecationResult;
 import com.synopsys.integration.detect.configuration.validation.DetectConfigurationBootManager;
 import com.synopsys.integration.detect.interactive.InteractiveManager;
-import com.synopsys.integration.detect.lifecycle.DetectContext;
+import com.synopsys.integration.detect.lifecycle.boot.decision.BlackDuckDecision;
 import com.synopsys.integration.detect.lifecycle.boot.decision.ProductDecider;
-import com.synopsys.integration.detect.lifecycle.boot.decision.ProductDecision;
+import com.synopsys.integration.detect.lifecycle.boot.decision.RunDecision;
 import com.synopsys.integration.detect.lifecycle.boot.product.ProductBoot;
-import com.synopsys.integration.detect.lifecycle.run.RunOptions;
 import com.synopsys.integration.detect.lifecycle.run.data.ProductRunData;
+import com.synopsys.integration.detect.lifecycle.run.singleton.BootSingletons;
 import com.synopsys.integration.detect.util.filter.DetectOverrideableFilter;
 import com.synopsys.integration.detect.util.filter.DetectToolFilter;
 import com.synopsys.integration.detect.workflow.airgap.AirGapCreator;
@@ -63,16 +63,16 @@ public class DetectBoot {
 
     public static final PrintStream DEFAULT_PRINT_STREAM = System.out;
 
+    private final EventSystem eventSystem;
     private final DetectBootFactory detectBootFactory;
     private final DetectArgumentState detectArgumentState;
     private final List<PropertySource> propertySources;
-    private final DetectContext detectContext;
 
-    public DetectBoot(DetectBootFactory detectBootFactory, DetectArgumentState detectArgumentState, List<PropertySource> propertySources, DetectContext detectContext) {
+    public DetectBoot(EventSystem eventSystem, DetectBootFactory detectBootFactory, DetectArgumentState detectArgumentState, List<PropertySource> propertySources) {
+        this.eventSystem = eventSystem;
         this.detectBootFactory = detectBootFactory;
         this.detectArgumentState = detectArgumentState;
         this.propertySources = propertySources;
-        this.detectContext = detectContext;
     }
 
     public Optional<DetectBootResult> boot(String detectVersion) throws IOException, IllegalAccessException {
@@ -99,22 +99,17 @@ public class DetectBoot {
         }
 
         PropertyConfiguration detectConfiguration = new PropertyConfiguration(propertySources);
-        EventSystem eventSystem = detectBootFactory.getEventSystem();
 
         SortedMap<String, String> maskedRawPropertyValues = collectMaskedRawPropertyValues(detectConfiguration);
-        Set<String> propertyKeys = new HashSet(DetectProperties.allProperties().getPropertyKeys());
+        Set<String> propertyKeys = new HashSet<>(DetectProperties.allProperties().getPropertyKeys());
 
-        publishCollectedPropertyValues(maskedRawPropertyValues, eventSystem);
+        publishCollectedPropertyValues(maskedRawPropertyValues);
 
         logger.debug("Configuration processed completely.");
 
         DetectConfigurationBootManager detectConfigurationBootManager = detectBootFactory.createDetectConfigurationBootManager(detectConfiguration);
         DeprecationResult deprecationResult = detectConfigurationBootManager.checkForDeprecations(detectConfiguration);
-
-        Boolean suppressConfigurationOutput = detectConfiguration.getValueOrDefault(DetectProperties.DETECT_SUPPRESS_CONFIGURATION_OUTPUT.getProperty());
-        if (Boolean.FALSE.equals(suppressConfigurationOutput)) {
-            detectConfigurationBootManager.printConfiguration(maskedRawPropertyValues, propertyKeys, deprecationResult.getAdditionalNotes());
-        }
+        detectConfigurationBootManager.printConfiguration(maskedRawPropertyValues, propertyKeys, deprecationResult.getAdditionalNotes());
 
         Optional<DetectUserFriendlyException> possiblePropertyParseError = detectConfigurationBootManager.validateForPropertyParseErrors();
         if (possiblePropertyParseError.isPresent()) {
@@ -166,15 +161,17 @@ public class DetectBoot {
 
         ProductRunData productRunData;
         try {
-            RunOptions runOptions = detectConfigurationFactory.createRunOptions();
-            DetectToolFilter detectToolFilter = runOptions.getDetectToolFilter();
+
             ProductDecider productDecider = new ProductDecider();
-            ProductDecision productDecision = productDecider.decide(detectConfigurationFactory, directoryManager.getUserHome(), detectToolFilter);
+            BlackDuckDecision blackDuckDecision = productDecider.decideBlackDuck(detectConfigurationFactory.createBlackDuckConnectionDetails(), detectConfigurationFactory.createBlackDuckSignatureScannerOptions(),
+                detectConfigurationFactory.createScanMode(), detectConfigurationFactory.createBdioOptions());
+            RunDecision runDecision = new RunDecision(detectConfigurationFactory.createDetectTarget() == DetectTargetType.IMAGE); //TODO: Move to proper decision home. -jp
+            DetectToolFilter detectToolFilter = detectConfigurationFactory.createToolFilter(runDecision, blackDuckDecision);
 
             logger.debug("Decided what products will be run. Starting product boot.");
 
             ProductBoot productBoot = detectBootFactory.createProductBoot(detectConfigurationFactory);
-            productRunData = productBoot.boot(productDecision);
+            productRunData = productBoot.boot(blackDuckDecision, detectToolFilter);
         } catch (DetectUserFriendlyException e) {
             return Optional.of(DetectBootResult.exception(e, detectConfiguration, directoryManager, diagnosticSystem));
         }
@@ -192,32 +189,16 @@ public class DetectBoot {
             return Optional.of(DetectBootResult.exception(e, detectConfiguration, directoryManager, diagnosticSystem));
         }
 
-        //Finished, populate the detect context
-        detectContext.registerBean(detectBootFactory.getDetectRun());
-        detectContext.registerBean(eventSystem);
-        detectContext.registerBean(detectBootFactory.createDetectorProfiler());
-
-        detectContext.registerBean(detectConfiguration);
-        detectContext.registerBean(detectableOptionFactory);
-        detectContext.registerBean(detectConfigurationFactory);
-
-        detectContext.registerBean(directoryManager);
-        detectContext.registerBean(detectBootFactory.createObjectMapper());
-        detectContext.registerBean(detectBootFactory.createXmlDocumentBuilder());
-        detectContext.registerBean(freemarkerConfiguration);
-
-        detectContext.registerConfiguration(RunBeanConfiguration.class);
-        detectContext.lock(); //can only refresh once, this locks and triggers refresh.
-
-        return Optional.of(DetectBootResult.run(detectConfiguration, productRunData, directoryManager, diagnosticSystem));
+        BootSingletons bootSingletons = detectBootFactory.createRunDependencies(productRunData, detectConfiguration, detectableOptionFactory, detectConfigurationFactory, directoryManager, freemarkerConfiguration);
+        return Optional.of(DetectBootResult.run(bootSingletons, detectConfiguration, productRunData, directoryManager, diagnosticSystem));
     }
 
     private SortedMap<String, String> collectMaskedRawPropertyValues(PropertyConfiguration propertyConfiguration) throws IllegalAccessException {
-        return new TreeMap(propertyConfiguration.getMaskedRawValueMap(new HashSet<>(DetectProperties.allProperties().getProperties()), DetectPropertyUtil.PASSWORDS_AND_TOKENS_PREDICATE));
+        return new TreeMap<>(propertyConfiguration.getMaskedRawValueMap(new HashSet<>(DetectProperties.allProperties().getProperties()), DetectPropertyUtil.PASSWORDS_AND_TOKENS_PREDICATE));
     }
 
-    private void publishCollectedPropertyValues(Map<String, String> maskedRawPropertyValues, EventSystem eventSystem) {
-        eventSystem.publishEvent(Event.RawMaskedPropertyValuesCollected, new TreeMap(maskedRawPropertyValues));
+    private void publishCollectedPropertyValues(Map<String, String> maskedRawPropertyValues) {
+        eventSystem.publishEvent(Event.RawMaskedPropertyValuesCollected, new TreeMap<>(maskedRawPropertyValues));
     }
 
 }

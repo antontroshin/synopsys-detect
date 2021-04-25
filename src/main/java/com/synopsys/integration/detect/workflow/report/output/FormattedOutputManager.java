@@ -12,11 +12,14 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
+
+import org.apache.commons.lang3.StringUtils;
 
 import com.synopsys.integration.common.util.Bds;
 import com.synopsys.integration.detect.configuration.DetectInfo;
@@ -25,6 +28,7 @@ import com.synopsys.integration.detect.workflow.event.Event;
 import com.synopsys.integration.detect.workflow.event.EventSystem;
 import com.synopsys.integration.detect.workflow.result.DetectResult;
 import com.synopsys.integration.detect.workflow.status.DetectIssue;
+import com.synopsys.integration.detect.workflow.status.Operation;
 import com.synopsys.integration.detect.workflow.status.Status;
 import com.synopsys.integration.detect.workflow.status.UnrecognizedPaths;
 import com.synopsys.integration.detectable.detectable.explanation.Explanation;
@@ -41,6 +45,7 @@ public class FormattedOutputManager {
     private final List<DetectIssue> detectIssues = new ArrayList<>();
     private final Map<String, List<File>> unrecognizedPaths = new HashMap<>();
     private SortedMap<String, String> rawMaskedPropertyValues = null;
+    private final List<Operation> detectOperations = new LinkedList<>();
 
     public FormattedOutputManager(EventSystem eventSystem) {
         eventSystem.registerListener(Event.DetectorsComplete, this::detectorsComplete);
@@ -51,15 +56,16 @@ public class FormattedOutputManager {
         eventSystem.registerListener(Event.UnrecognizedPaths, this::addUnrecognizedPaths);
         eventSystem.registerListener(Event.ProjectNameVersionChosen, this::projectNameVersionChosen);
         eventSystem.registerListener(Event.RawMaskedPropertyValuesCollected, this::rawMaskedPropertyValuesCollected);
+        eventSystem.registerListener(Event.DetectOperation, this::addOperation);
     }
 
     public FormattedOutput createFormattedOutput(DetectInfo detectInfo) {
         FormattedOutput formattedOutput = new FormattedOutput();
-        formattedOutput.formatVersion = "0.4.0";
+        formattedOutput.formatVersion = "0.5.0";
         formattedOutput.detectVersion = detectInfo.getDetectVersion();
 
         formattedOutput.results = Bds.of(detectResults)
-                                      .map(result -> new FormattedResultOutput(result.getResultLocation(), result.getResultMessage()))
+                                      .map(result -> new FormattedResultOutput(result.getResultLocation(), result.getResultMessage(), removeTabsFromMessages(result.getResultSubMessages())))
                                       .toList();
 
         formattedOutput.status = Bds.of(statusSummaries)
@@ -67,8 +73,12 @@ public class FormattedOutputManager {
                                      .toList();
 
         formattedOutput.issues = Bds.of(detectIssues)
-                                     .map(issue -> new FormattedIssueOutput(issue.getType().name(), issue.getMessages()))
+                                     .map(issue -> new FormattedIssueOutput(issue.getType().name(), issue.getTitle(), issue.getMessages()))
                                      .toList();
+        formattedOutput.operations = Bds.of(detectOperations)
+                                         .map(operation -> new FormattedOperationOutput(Operation.formatTimestamp(operation.getStartTime()), Operation.formatTimestamp(operation.getEndTime().orElse(null)), operation.getName(),
+                                             operation.getStatusType().name()))
+                                         .toList();
 
         if (detectorToolResult != null) {
             formattedOutput.detectors = Bds.of(detectorToolResult.getRootDetectorEvaluationTree())
@@ -92,6 +102,18 @@ public class FormattedOutputManager {
         formattedOutput.propertyValues = rawMaskedPropertyValues;
 
         return formattedOutput;
+    }
+
+    private List<String> removeTabsFromMessages(List<String> messages) {
+        if (messages.isEmpty()) {
+            return messages;
+        }
+        // if a line starts with a tab character remove it.  Any other tabs replace it with spaces to preserve a similar look to the messages as the console output.
+        return messages.stream()
+                   .filter(StringUtils::isNotBlank)
+                   .map(message -> StringUtils.replaceOnce(message, "\t", ""))
+                   .map(message -> StringUtils.replace(message, "\t", "  "))
+                   .collect(Collectors.toList());
     }
 
     private FormattedDetectorOutput convertDetector(DetectorEvaluation evaluation) {
@@ -153,6 +175,10 @@ public class FormattedOutputManager {
             this.unrecognizedPaths.put(unrecognizedPaths.getGroup(), new ArrayList<>());
         }
         this.unrecognizedPaths.get(unrecognizedPaths.getGroup()).addAll(unrecognizedPaths.getPaths());
+    }
+
+    public void addOperation(Operation detectOperation) {
+        this.detectOperations.add(detectOperation);
     }
 
     private void rawMaskedPropertyValuesCollected(SortedMap<String, String> keyValueMap) {

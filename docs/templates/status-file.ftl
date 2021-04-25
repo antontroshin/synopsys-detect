@@ -19,6 +19,7 @@ The file includes status codes, issues encountered and results produced. As addi
 "results": [ List of Results, see details below. ]
 "unrecognizedPaths": [ List of Unrecognized Paths, see details below. ]
 "codeLocations": [ List of code locations produced, see details below. ]
+"propertyValues": { An object representing all provided properties, see details below. }
 }
 ```
 
@@ -40,10 +41,11 @@ The file includes status codes, issues encountered and results produced. As addi
 "projectName": The project name this detectable found.
 "projectVersion": The project version this detectable found.
 "codeLocationCount": The number of code locations this detector produced.
+"explanations": [ A human readable list of strings describing why this detector ran such as "Found file:
+<path>". ]
 }
 ```
 ###Detector Status Codes
-
 | Status Code | Description |
 | --- | --- |
 <#list statusCodes as statusCode>
@@ -62,18 +64,43 @@ The file includes status codes, issues encountered and results produced. As addi
 ```
 {
 "type": A key describing the type of issue, currently "EXCEPTION", "DEPRECATION" or "DETECTOR".
-"messages": A list of a strings describing the issue.
+"title": A string describing the issue.
+"messages": A list of a strings describing the details of the issue.
 }
 ```
 
 ##Results
 
-A result is a URL or file path to output produced by the ${solution_name} run: a Black Duck Bill Of Materials, Risk Report, Notices Report, or Air Gap zip.
+A result is a URL, file path to output, or messages produced by the ${solution_name} run: a Black Duck Bill Of Materials, Risk Report, Notices Report, Air Gap zip, or Rapid Scan results.
 ```
 {
 "location": The path to the result.
 "message": A string describing the result.
+"sub_messages": A list of strings providing more detail about the result.
 }
+```
+
+##Property Values
+
+A map of every property key to it's string value that detect found. These are only properties to which detect has a known key,
+so pass-through properties like docker and dynamic properties like custom fields are not included. Passwords and other sensitive fields are masked.
+
+```
+  "propertyValues": {
+    "key": "value",
+    "boolean-key": "true"
+  }
+```
+
+##Operations
+A list of information regarding internal execution of detect to describe when portions of detect run and what their status is.
+This information is intended to be used when detect fails and the reason for the failure needs to be determined.
+
+```
+"startTimestamp": A formatted UTC timestamp when the execution started.
+"endTimestamp": A formatted UTC timestamp when the execution ended.
+"descriptionKey": A string that describes what is being executed.
+"status": "SUCCESS" or "FAILURE"
 ```
 
 ##Unrecognized Paths

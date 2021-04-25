@@ -40,14 +40,16 @@ import org.mockito.ArgumentMatcher;
 import org.mockito.Mockito;
 
 import com.synopsys.integration.bdio.graph.DependencyGraph;
+import com.synopsys.integration.common.util.finder.SimpleFileFinder;
 import com.synopsys.integration.configuration.property.types.enumfilterable.FilterableEnumValue;
 import com.synopsys.integration.detect.configuration.DetectUserFriendlyException;
 import com.synopsys.integration.detect.configuration.ExcludeIncludeEnumFilter;
 import com.synopsys.integration.detect.configuration.enumeration.ExitCodeType;
+import com.synopsys.integration.detect.lifecycle.shutdown.ExitCodePublisher;
 import com.synopsys.integration.detect.lifecycle.shutdown.ExitCodeRequest;
 import com.synopsys.integration.detect.tool.detector.extraction.ExtractionEnvironmentProvider;
 import com.synopsys.integration.detect.workflow.event.EventSystem;
-import com.synopsys.integration.detect.workflow.event.EventType;
+import com.synopsys.integration.detect.workflow.status.StatusEventPublisher;
 import com.synopsys.integration.detectable.DetectableEnvironment;
 import com.synopsys.integration.detectable.detectable.codelocation.CodeLocation;
 import com.synopsys.integration.detectable.detectable.exception.DetectableException;
@@ -78,43 +80,21 @@ public class DetectorToolTest {
         EventSystem eventSystem = Mockito.mock(EventSystem.class);
         CodeLocationConverter codeLocationConverter = Mockito.mock(CodeLocationConverter.class);
         DetectorIssuePublisher detectorIssuePublisher = Mockito.mock(DetectorIssuePublisher.class);
+        StatusEventPublisher statusEventPublisher = Mockito.mock(StatusEventPublisher.class);
+        ExitCodePublisher exitCodePublisher = Mockito.mock(ExitCodePublisher.class);
+        DetectorEventPublisher detectorEventPublisher = Mockito.mock(DetectorEventPublisher.class);
 
-        DetectorTool tool = new DetectorTool(detectorFinder, extractionEnvironmentProvider, eventSystem, codeLocationConverter, detectorIssuePublisher);
-
-        File directory = new File(".");
-        DetectorRuleSet detectorRuleSet = Mockito.mock(DetectorRuleSet.class);
-        DetectorFinderOptions detectorFinderOptions = Mockito.mock(DetectorFinderOptions.class);
-        DetectorEvaluationOptions evaluationOptions = Mockito.mock(DetectorEvaluationOptions.class);
-        final String projectBomTool = "testBomTool";
-
-        tool.performDetectors(directory, detectorRuleSet, detectorFinderOptions, evaluationOptions, projectBomTool, new ArrayList<>());
-
-        Mockito.verify(eventSystem).publishEvent(Mockito.any(EventType.class), Mockito.argThat(new FailureExitCodeRequestMatcher()));
-    }
-
-    @Test
-    public void testDetectorFinderException() throws DetectorFinderDirectoryListException {
-
-        ExtractionEnvironmentProvider extractionEnvironmentProvider = Mockito.mock(ExtractionEnvironmentProvider.class);
-        DetectorFinder detectorFinder = Mockito.mock(DetectorFinder.class);
-        Mockito.when(detectorFinder.findDetectors(Mockito.any(), Mockito.any(), Mockito.any())).thenThrow(DetectorFinderDirectoryListException.class);
-        EventSystem eventSystem = Mockito.mock(EventSystem.class);
-        CodeLocationConverter codeLocationConverter = Mockito.mock(CodeLocationConverter.class);
-        DetectorIssuePublisher detectorIssuePublisher = Mockito.mock(DetectorIssuePublisher.class);
-
-        DetectorTool tool = new DetectorTool(detectorFinder, extractionEnvironmentProvider, eventSystem, codeLocationConverter, detectorIssuePublisher);
+        DetectorTool tool = new DetectorTool(detectorFinder, extractionEnvironmentProvider, eventSystem, codeLocationConverter, detectorIssuePublisher, statusEventPublisher, exitCodePublisher, detectorEventPublisher);
 
         File directory = new File(".");
         DetectorRuleSet detectorRuleSet = Mockito.mock(DetectorRuleSet.class);
         DetectorFinderOptions detectorFinderOptions = Mockito.mock(DetectorFinderOptions.class);
         DetectorEvaluationOptions evaluationOptions = Mockito.mock(DetectorEvaluationOptions.class);
         final String projectBomTool = "testBomTool";
-        try {
-            tool.performDetectors(directory, detectorRuleSet, detectorFinderOptions, evaluationOptions, projectBomTool, new ArrayList<>());
-            fail();
-        } catch (DetectUserFriendlyException ex) {
-            //pass
-        }
+
+        tool.performDetectors(directory, detectorRuleSet, detectorFinderOptions, evaluationOptions, projectBomTool, new ArrayList<>(), new SimpleFileFinder());
+
+        Mockito.verify(exitCodePublisher).publishExitCode(Mockito.any(ExitCodeType.class), Mockito.anyString());
     }
 
     @Test
@@ -193,8 +173,11 @@ public class DetectorToolTest {
         EventSystem eventSystem = Mockito.mock(EventSystem.class);
         CodeLocationConverter codeLocationConverter = Mockito.mock(CodeLocationConverter.class);
         DetectorIssuePublisher detectorIssuePublisher = Mockito.mock(DetectorIssuePublisher.class);
+        StatusEventPublisher statusEventPublisher = Mockito.mock(StatusEventPublisher.class);
+        ExitCodePublisher exitCodePublisher = Mockito.mock(ExitCodePublisher.class);
+        DetectorEventPublisher detectorEventPublisher = Mockito.mock(DetectorEventPublisher.class);
 
-        DetectorTool tool = new DetectorTool(detectorFinder, extractionEnvironmentProvider, eventSystem, codeLocationConverter, detectorIssuePublisher);
+        DetectorTool tool = new DetectorTool(detectorFinder, extractionEnvironmentProvider, eventSystem, codeLocationConverter, detectorIssuePublisher, statusEventPublisher, exitCodePublisher, detectorEventPublisher);
         File directory = new File(".");
         GoModCliDetectable detectable = createDetectable(extraction, extractionResult);
         DetectorRule<GoModCliDetectable> rule = createRule(detectable);
@@ -203,9 +186,9 @@ public class DetectorToolTest {
         DetectorEvaluationOptions evaluationOptions = createEvaluationOptions();
 
         DetectorEvaluationTree evaluationTree = createEvaluationTree(extraction, extractionResult, directory, rule, detectorRuleSet);
-        Mockito.when(detectorFinder.findDetectors(Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(Optional.of(evaluationTree));
+        Mockito.when(detectorFinder.findDetectors(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(Optional.of(evaluationTree));
 
-        return tool.performDetectors(directory, detectorRuleSet, detectorFinderOptions, evaluationOptions, projectBomTool, new ArrayList<>());
+        return tool.performDetectors(directory, detectorRuleSet, detectorFinderOptions, evaluationOptions, projectBomTool, new ArrayList<>(), new SimpleFileFinder());
     }
 
     private GoModCliDetectable createDetectable(Extraction extraction, DetectableResult extractionResult) throws DetectableException {

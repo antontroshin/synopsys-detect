@@ -1,17 +1,46 @@
 # Release notes
 
+## Version 7.1.0
+
+### New Features
+
+### Changed features
+
+### Resolved issues
+* (IDETECT-2541) Resolved an issue that caused the CLANG detector to fail when run in non-English locales on Ubuntu and Debian systems.
+
 ## Version 7.0.0
 ### New Features
+* Added scripts detect7.sh and detect7.ps1 for invoking ${solution_name} 7.x.x. detect.sh and detect.ps1 will (by default) continue to invoke the latest ${solution_name} 6 version.
+* Added support for Yarn workspaces.
 * Added support for the dependency graph SBT plugin. Resolution cache generation is no longer a requirement of the SBT detector.
+* Added the properties [detect.excluded.directories](../properties/configuration/paths/#detect-excluded-directories-advanced), [detect.exclude.default.directories](../properties/configuration/paths/#detect-exclude-default-directories-advanced), and [detect.excluded.directory.search.depth](../properties/configuration/signature scanner/#detect-excluded-directory-search-depth) to handle exclusions for detector search and signature scanning.
+* Added ability to specify excluded directory paths using [glob patterns](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/nio/file/FileSystem.html#getPathMatcher(java.lang.String)).
+* Added properties [detect.lerna.excluded.packages](../properties/detectors/lerna/#lerna-packages-excluded-advanced) and [detect.lerna.included.packages](../properties/detectors/lerna/#lerna-packages-included-advanced) to exclude and include specific Lerna packages.
+* Added critical security risks to the Black Duck Risk Report pdf.
+* Added detect.target.type to enhance the docker user experience. When set to IMAGE, some tools are automatically disabled and detect optimizes for an image based scan.
+* Added binary scanning of the container filesystem to the default Docker image scanning workflow.
+If you are scanning Docker images and your Black Duck server does not have the binary scanning feature enabled,
+use --detect.tools.exluded=BINARY_SCAN to disable the binary scan step.
 
 ### Changed features
 * Gradle detector no longer uses the gradle inspector. Only the init script is required.
 * The default BDIO format for communicating dependency graphs to Black Duck has been changed from BDIO1 to BDIO2.
+* Risk report generation will download fonts from Artifactory or use the font files in the fonts directory in the air gap zip of detect.
 
 ### Resolved issues
+* (IDETECT-2462) Resolved an issue where projects were being inaccurately diagnosed as Poetry projects due to the presence of a pyproject.toml file.
+* (IDETECT-2527) Resolved an issue in the Go Mod detector to extract and process data even if 'go mod why' command fails to run.
 * (IDETECT-2434) Resolved an issue in the CLANG detector on Ubuntu and Debian systems that caused it to omit a package when that package had been installed on the system from multiple architectures.
+* (IDETECT-2362) The CLANG detector now uses the KB preferred alias namespace feature for improved match accuracy.
 * (IDETECT-2413) Resolved an issue to upgrade internal dependencies to support JDK 15.
 * (IDETECT-2409) Resolved an issue to allow Gradle detector to support Gradle 6.8.
+* (IDETECT-2099) Improved error reporting for exceptions that occur during a Detect run. For each exception, a Detect "issue" is written to the log and to the status.json file.
+* (IDETECT-2516) Improved error reporting for the case where environment variable BDS_JAVA_HOME is set incorrectly.
+
+## Version 6.9.1
+### Resolved issues
+* (IDETECT-2555) Resolved an issue that could cause Detect, when run against Black Duck 2020.10.0, to fail with a message similar to: "Cannot cast... to... VersionBomCodeLocationBomComputedNotificationUserView".
 
 ## Version 6.9.0
 ### New Features
@@ -22,12 +51,17 @@
 
 ### Changed features
 * Added the timezone to the date format in the default log message format.
+* Reverted deprecations for detect.blackduck.signature.scanner.arguments, detect.blackduck.signature.scanner.copyright.search, detect.blackduck.signature.scanner.dry.run, detect.blackduck.signature.scanner.individual.file.matching, detect.blackduck.signature.scanner.license.search, detect.blackduck.signature.scanner.local.path, detect.blackduck.signature.scanner.paths, detect.blackduck.signature.scanner.snippet.matching, detect.blackduck.signature.scanner.upload.source.mode.
 
 ### Resolved issues
 * (IDETECT-1986) Resolved an issue where warnings regarding reflective access appear at the start of Detect.
 * (IDETECT-2400) Resolved an issue where 'dependencies' would be removed from the value of the detect.gradle.build.command property.
 * (IDETECT-2394) Resolved an issue that created inaccurate relationships in the BDIO files when Gemlock files were processed.
 * (IDETECT-2404) Resolved an issue where signature scanner arguments passed through detect.blackduck.signature.scanner.arguments that contained space were being improperly parsed.
+* (IDETECT-2525) Resolved an issue with the Yarn detector that caused component version information to be missing when the yarn.lock file contained quoted field keys.
+* (IDETECT-2254) Resolved an issue with the Yarn detector that caused certain components to be omitted from some Yarn 2 projects.
+* (IDETECT-2471) Resolved an issue where a missing Git executable in certain situations causes an exception.
+
 
 ## Version 6.8.0
 ### New features

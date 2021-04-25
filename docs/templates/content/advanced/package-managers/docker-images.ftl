@@ -6,12 +6,19 @@ For simple use cases, add either ```--detect.docker.image={repo}:{tag}``` or ```
 The documentation for Docker Inspector is available [here](https://synopsys.atlassian.net/wiki/spaces/INTDOCS/pages/187596884/Black+Duck+Docker+Inspector).
 
 When passed a value for either detect.docker.image or detect.docker.tar,
-${solution_name} runs Docker Inspector on given image (the "target image"),
-creating one code location. ${solution_name} by default runs
-the ${blackduck_signature_scanner_name} on the "container file system"
-(the file system a container created from the image has at startup time).
+${solution_name} runs Docker Inspector on the given image (the "target image"),
+creating one code location.
+
+${solution_name} by default runs
+the ${blackduck_signature_scanner_name} on an image built from the "container file system".
+This image is referred to as
+the squashed image (because it has only one layer, to eliminate the chance of false positives from lower layers).
+This scan creates another code location.
+
+Finally, ${solution_name} by default
+runs ${blackduck_binary_scan_capability} on the container file system.
 Refer to [${solution_name}'s scan target](#scantarget) for more details.
-This creates a second code location.
+This also creates a code location.
 
 ### File permissions
 
@@ -31,7 +38,7 @@ For example, suppose you need to set Docker Inspector's service.timeout value (t
 
 For example:
 ```
-./detect.sh --detect.docker.image=ubuntu:latest --detect.docker.passthrough.service.timeout=480000
+./detect7.sh --detect.docker.image=ubuntu:latest --detect.docker.passthrough.service.timeout=480000
 ```
 
 You can set any Docker Inspector property using this method.
@@ -52,6 +59,10 @@ When ${solution_name} invokes both Docker Inspector because either detect.docker
 
 In earlier versions of ${solution_name} / Docker Inspector, ${solution_name} ran the ${blackduck_signature_scanner_name} directly on the target image. This approach had the disadvantage of potentially producing false positives under certain circumstances. For example, suppose your target image consists of multiple layers. If version 1 of a package is installed in layer 0, and then replaced with a newer version of that package in layer 1, both versions exist in the image, even though the initial container file system only includes version 2. A ${blackduck_signature_scan_act} of the target image shows both versions, even though version 1 has been effectively replaced with version 2. The current ${solution_name} / Docker Inspector functionality avoids this potential for false positives.
 
+By default, ${solution_name} also runs ${blackduck_binary_scan_capability} on the initial container file system.
+If your ${blackduck_product_name} server does not have ${blackduck_binary_scan_capability} enabled, you
+should disable ${blackduck_binary_scan_capability}. For example, you might set: *--detect.tools.excluded=BINARY_SCAN*.
+
 ### Isolating application components
 
 If you are interested in components from the application layers of your image, but not interested in components from the underlying platform layers, you can exclude components from platform layers from the results.
@@ -64,7 +75,7 @@ Run the docker inspect command on the base image; in our example this is ubuntu:
 Find the last element in the RootFS.Layers array. This is the platform top layer ID. In the following example, this is sha256:b079b3fa8d1b4b30a71a6e81763ed3da1327abaf0680ed3ed9f00ad1d5de5e7c.
 Set the value of the Docker Inspector property docker.platform.top.layer.id to the platform top layer ID. For example:
 
-./detect.sh ... --detect.docker.image={your application image} --detect.docker.platform.top.layer.id=sha256:b079b3fa8d1b4b30a71a6e81763ed3da1327abaf0680ed3ed9f00ad1d5de5e7c
+./detect7.sh ... --detect.docker.image={your application image} --detect.docker.platform.top.layer.id=sha256:b079b3fa8d1b4b30a71a6e81763ed3da1327abaf0680ed3ed9f00ad1d5de5e7c
 
 In this mode, there may be some loss in match accuracy from the ${blackduck_signature_scanner_name} because, in this scenario, the ${blackduck_signature_scanner_name} may be deprived of some contextual information, such as the operating system files that enable it to determine the Linux distribution, and that that may negatively affect its ability to accurately identify components.
 

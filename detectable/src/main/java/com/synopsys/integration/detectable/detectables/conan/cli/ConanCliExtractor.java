@@ -24,6 +24,7 @@ import com.synopsys.integration.detectable.detectable.executable.DetectableExecu
 import com.synopsys.integration.detectable.detectables.conan.ConanDetectableResult;
 import com.synopsys.integration.detectable.detectables.conan.cli.parser.ConanInfoParser;
 import com.synopsys.integration.detectable.extraction.Extraction;
+import com.synopsys.integration.detectable.util.ToolVersionLogger;
 import com.synopsys.integration.executable.ExecutableOutput;
 
 public class ConanCliExtractor {
@@ -37,6 +38,7 @@ public class ConanCliExtractor {
     }
 
     public Extraction extract(File projectDir, ExecutableTarget conanExe, ConanCliExtractorOptions conanCliExtractorOptions) {
+        ToolVersionLogger.log(executableRunner, projectDir, conanExe);
         List<String> exeArgs = generateConanInfoCmdArgs(projectDir, conanCliExtractorOptions);
         ExecutableOutput conanInfoOutput;
         try {
@@ -87,7 +89,7 @@ public class ConanCliExtractor {
         exeArgs.add("info");
         conanCliExtractorOptions.getLockfilePath().ifPresent(lockfilePath -> {
             exeArgs.add("--lockfile");
-            exeArgs.add(lockfilePath);
+            exeArgs.add(lockfilePath.toString());
         });
         conanCliExtractorOptions.getAdditionalArguments().ifPresent(argsString -> {
             String[] additionalArgs = argsString.split(" +");
